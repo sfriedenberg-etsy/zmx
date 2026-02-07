@@ -198,10 +198,14 @@ const Daemon = struct {
         if (self.has_pty_output and self.has_had_client) {
             const cursor = term.getCursor();
             std.log.debug("cursor before serialize: x={d} y={d} pending_wrap={}", .{ cursor.x, cursor.y, cursor.pending_wrap });
-            if (term.serializeState()) |term_output| {
+            const term_output = term.serializeState() catch |err| blk: {
+                std.log.warn("failed to serialize terminal state err={s}", .{@errorName(err)});
+                break :blk null;
+            };
+            if (term_output) |output| {
                 std.log.debug("serialize terminal state", .{});
-                defer self.alloc.free(term_output);
-                ipc.appendMessage(self.alloc, &client.write_buf, .Output, term_output) catch |err| {
+                defer self.alloc.free(output);
+                ipc.appendMessage(self.alloc, &client.write_buf, .Output, output) catch |err| {
                     std.log.warn("failed to buffer terminal state for client err={s}", .{@errorName(err)});
                 };
                 client.has_pending_output = true;
@@ -303,9 +307,13 @@ const Daemon = struct {
             @enumFromInt(payload[0])
         else
             .plain;
-        if (term.serialize(format)) |output| {
-            defer self.alloc.free(output);
-            try ipc.appendMessage(self.alloc, &client.write_buf, .History, output);
+        const output = term.serialize(format) catch |err| blk: {
+            std.log.warn("failed to serialize terminal history err={s}", .{@errorName(err)});
+            break :blk null;
+        };
+        if (output) |content| {
+            defer self.alloc.free(content);
+            try ipc.appendMessage(self.alloc, &client.write_buf, .History, content);
             client.has_pending_output = true;
         } else {
             try ipc.appendMessage(self.alloc, &client.write_buf, .History, "");

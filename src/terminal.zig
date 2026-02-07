@@ -77,13 +77,15 @@ pub fn Terminal(comptime Impl: type) type {
             return .{ .impl = self.impl.vtStream() };
         }
 
-        /// Serialize terminal state for session restoration (VT format with modes/screen)
-        pub fn serializeState(self: *Self) ?[]const u8 {
+        /// Serialize terminal state for session restoration (VT format with modes/screen).
+        /// Returns null if the terminal has no content to serialize.
+        pub fn serializeState(self: *Self) error{OutOfMemory}!?[]const u8 {
             return self.impl.serializeState(self.alloc);
         }
 
-        /// Serialize terminal content in the specified format
-        pub fn serialize(self: *Self, format: Format) ?[]const u8 {
+        /// Serialize terminal content in the specified format.
+        /// Returns null if the format is unsupported or terminal has no content.
+        pub fn serialize(self: *Self, format: Format) error{OutOfMemory}!?[]const u8 {
             return self.impl.serialize(self.alloc, format);
         }
     };

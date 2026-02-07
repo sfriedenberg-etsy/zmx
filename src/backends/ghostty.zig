@@ -49,37 +49,43 @@ pub const GhosttyBackend = struct {
         return .{ .stream = self.term.vtStream() };
     }
 
-    pub fn serializeState(self: *GhosttyBackend, alloc: std.mem.Allocator) ?[]const u8 {
+    /// Serialize terminal state for session restoration.
+    /// Includes modes, scrolling region, pwd, and keyboard state but excludes
+    /// palette (terminal has its own) and tabstops (shell will restore).
+    pub fn serializeState(self: *GhosttyBackend, alloc: std.mem.Allocator) error{OutOfMemory}!?[]const u8 {
         var builder: std.Io.Writer.Allocating = .init(alloc);
         defer builder.deinit();
 
         var term_formatter = ghostty_vt.formatter.TerminalFormatter.init(&self.term, .vt);
         term_formatter.content = .{ .selection = null };
         term_formatter.extra = .{
-            .palette = false,
+            .palette = false, // Terminal emulator has its own palette
             .modes = true,
             .scrolling_region = true,
-            .tabstops = false,
+            .tabstops = false, // Shell restores its own tabstops
             .pwd = true,
             .keyboard = true,
             .screen = .all,
         };
 
         term_formatter.format(&builder.writer) catch |err| {
+            // Format errors are typically I/O errors on the writer, which for
+            // an allocating writer means OOM
+            @branchHint(.unlikely);
             std.log.warn("failed to format terminal state err={s}", .{@errorName(err)});
-            return null;
+            return error.OutOfMemory;
         };
 
         const output = builder.writer.buffered();
         if (output.len == 0) return null;
 
-        return alloc.dupe(u8, output) catch |err| {
-            std.log.warn("failed to allocate terminal state err={s}", .{@errorName(err)});
-            return null;
-        };
+        return try alloc.dupe(u8, output);
     }
 
-    pub fn serialize(self: *GhosttyBackend, alloc: std.mem.Allocator, format: terminal.Format) ?[]const u8 {
+    /// Serialize terminal content in the specified format.
+    /// Plain format returns text only, VT includes escape sequences for full state,
+    /// HTML wraps content with inline styles.
+    pub fn serialize(self: *GhosttyBackend, alloc: std.mem.Allocator, format: terminal.Format) error{OutOfMemory}!?[]const u8 {
         var builder: std.Io.Writer.Allocating = .init(alloc);
         defer builder.deinit();
 
@@ -93,10 +99,10 @@ pub const GhosttyBackend = struct {
         term_formatter.extra = switch (format) {
             .plain => .none,
             .vt => .{
-                .palette = false,
+                .palette = false, // Terminal emulator has its own palette
                 .modes = true,
                 .scrolling_region = true,
-                .tabstops = false,
+                .tabstops = false, // Shell restores its own tabstops
                 .pwd = true,
                 .keyboard = true,
                 .screen = .all,
@@ -105,16 +111,14 @@ pub const GhosttyBackend = struct {
         };
 
         term_formatter.format(&builder.writer) catch |err| {
+            @branchHint(.unlikely);
             std.log.warn("failed to format terminal err={s}", .{@errorName(err)});
-            return null;
+            return error.OutOfMemory;
         };
 
         const output = builder.writer.buffered();
         if (output.len == 0) return null;
 
-        return alloc.dupe(u8, output) catch |err| {
-            std.log.warn("failed to allocate terminal output err={s}", .{@errorName(err)});
-            return null;
-        };
+        return try alloc.dupe(u8, output);
     }
 };
