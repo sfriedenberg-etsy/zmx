@@ -19,19 +19,27 @@
         env = zig2nix.outputs.zig-env.${system} {
           zig = zig2nix.outputs.packages.${system}.zig-0_15_2;
         };
+        pkgs = env.pkgs;
       in
       with builtins;
-      with env.pkgs.lib;
+      with pkgs.lib;
       let
         zmx-package = env.package {
           src = cleanSource ./.;
           zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
           zigPreferMusl = true;
         };
+        zmx-libvterm = env.package {
+          src = cleanSource ./.;
+          zigBuildFlags = [ "-Doptimize=ReleaseSafe" "-Dbackend=libvterm" ];
+          zigPreferMusl = true;
+          buildInputs = [ pkgs.libvterm-neovim ];
+        };
       in
       {
         packages = {
           zmx = zmx-package;
+          zmx-libvterm = zmx-libvterm;
           default = zmx-package;
         };
 
@@ -51,6 +59,7 @@
         };
 
         devShells.default = env.mkShell {
+          buildInputs = [ pkgs.libvterm-neovim ];
         };
       }
     ));

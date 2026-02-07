@@ -10,11 +10,17 @@ const macos_targets: []const std.Target.Query = &.{
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
 };
 
+const Backend = enum {
+    ghostty,
+    libvterm,
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const version = b.option([]const u8, "version", "Version string for release") orelse
         @as([]const u8, @import("build.zig.zon").version);
+    const backend = b.option(Backend, "backend", "Terminal emulator backend (default: ghostty)") orelse .ghostty;
 
     const run_step = b.step("run", "Run the app");
     const test_step = b.step("test", "Run unit tests");
@@ -30,6 +36,7 @@ pub fn build(b: *std.Build) void {
     options.addOption([]const u8, "version", version);
     options.addOption([]const u8, "git_sha", git_sha);
     options.addOption([]const u8, "ghostty_version", @import("build.zig.zon").dependencies.ghostty.hash);
+    options.addOption(Backend, "backend", backend);
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -38,16 +45,24 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.addOptions("build_options", options);
 
-    // You'll want to use a lazy dependency here so that ghostty is only
-    // downloaded if you actually need it.
-    if (b.lazyDependency("ghostty", .{
-        .target = target,
-        .optimize = optimize,
-    })) |dep| {
-        exe_mod.addImport(
-            "ghostty-vt",
-            dep.module("ghostty-vt"),
-        );
+    // Add backend-specific dependencies
+    switch (backend) {
+        .ghostty => {
+            // You'll want to use a lazy dependency here so that ghostty is only
+            // downloaded if you actually need it.
+            if (b.lazyDependency("ghostty", .{
+                .target = target,
+                .optimize = optimize,
+            })) |dep| {
+                exe_mod.addImport(
+                    "ghostty-vt",
+                    dep.module("ghostty-vt"),
+                );
+            }
+        },
+        .libvterm => {
+            exe_mod.linkSystemLibrary("vterm", .{});
+        },
     }
 
     // Exe
@@ -101,11 +116,18 @@ pub fn build(b: *std.Build) void {
         });
         release_mod.addOptions("build_options", options);
 
-        if (b.lazyDependency("ghostty", .{
-            .target = resolved,
-            .optimize = .ReleaseSafe,
-        })) |dep| {
-            release_mod.addImport("ghostty-vt", dep.module("ghostty-vt"));
+        switch (backend) {
+            .ghostty => {
+                if (b.lazyDependency("ghostty", .{
+                    .target = resolved,
+                    .optimize = .ReleaseSafe,
+                })) |dep| {
+                    release_mod.addImport("ghostty-vt", dep.module("ghostty-vt"));
+                }
+            },
+            .libvterm => {
+                release_mod.linkSystemLibrary("vterm", .{});
+            },
         }
 
         const release_exe = b.addExecutable(.{
