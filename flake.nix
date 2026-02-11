@@ -38,9 +38,15 @@
             "-Dbackend=libvterm"
           ];
           buildInputs = [ pkgs.libvterm-neovim ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
           # Remove ghostty dependency from zon file - not needed for libvterm backend
           postPatch = ''
             sed -i '/\.dependencies = \.{/,/},/{/\.ghostty/,/},/d;}' build.zig.zon
+          '';
+          postInstall = ''
+            wrapProgram $out/bin/zmx \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libvterm-neovim ]} \
+              --prefix DYLD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libvterm-neovim ]}
           '';
         };
       in
