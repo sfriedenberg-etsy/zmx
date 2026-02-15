@@ -29,7 +29,7 @@ const bash_completions =
     \\  cur="${COMP_WORDS[COMP_CWORD]}"
     \\  prev="${COMP_WORDS[COMP_CWORD-1]}"
     \\
-    \\  local commands="attach run detach list completions kill history version help"
+    \\  local commands="attach run detach detach-all list completions kill history version help"
     \\
     \\  if [[ $COMP_CWORD -eq 1 ]]; then
     \\    COMPREPLY=($(compgen -W "$commands" -- "$cur"))
@@ -37,7 +37,7 @@ const bash_completions =
     \\  fi
     \\
     \\  case "$prev" in
-    \\    attach|run|kill|history)
+    \\    attach|run|detach|kill|history)
     \\      local sessions=$(zmx list --short 2>/dev/null | tr '\n' ' ')
     \\      COMPREPLY=($(compgen -W "$sessions" -- "$cur"))
     \\      ;;
@@ -72,7 +72,8 @@ const zsh_completions =
     \\      commands=(
     \\        'attach:Attach to session, creating if needed'
     \\        'run:Send command without attaching'
-    \\        'detach:Detach all clients from current session'
+    \\        'detach:Detach all clients from current or named session'
+    \\        'detach-all:Detach all clients from all sessions'
     \\        'list:List active sessions'
     \\        'completions:Shell completion scripts'
     \\        'kill:Kill a session'
@@ -84,7 +85,7 @@ const zsh_completions =
     \\      ;;
     \\    args)
     \\      case $words[2] in
-    \\        attach|a|kill|k|run|r|history|hi)
+    \\        attach|a|detach|d|kill|k|run|r|history|hi)
     \\          _zmx_sessions
     \\          ;;
     \\        completions|c)
@@ -118,12 +119,13 @@ const zsh_completions =
 const fish_completions =
     \\complete -c zmx -f
     \\
-    \\set -l subcommands attach run detach list completions kill history version help
+    \\set -l subcommands attach run detach detach-all list completions kill history version help
     \\set -l no_subcmd "not __fish_seen_subcommand_from $subcommands"
     \\
     \\complete -c zmx -n $no_subcmd -a attach -d 'Attach to session, creating if needed'
     \\complete -c zmx -n $no_subcmd -a run -d 'Send command without attaching'
-    \\complete -c zmx -n $no_subcmd -a detach -d 'Detach all clients from current session'
+    \\complete -c zmx -n $no_subcmd -a detach -d 'Detach all clients from current or named session'
+    \\complete -c zmx -n $no_subcmd -a detach-all -d 'Detach all clients from all sessions'
     \\complete -c zmx -n $no_subcmd -a list -d 'List active sessions'
     \\complete -c zmx -n $no_subcmd -a completions -d 'Shell completion scripts'
     \\complete -c zmx -n $no_subcmd -a kill -d 'Kill a session'
@@ -131,7 +133,7 @@ const fish_completions =
     \\complete -c zmx -n $no_subcmd -a version -d 'Show version'
     \\complete -c zmx -n $no_subcmd -a help -d 'Show help message'
     \\
-    \\complete -c zmx -n "__fish_seen_subcommand_from attach run kill history" -a '(zmx list --short 2>/dev/null)' -d 'Session name'
+    \\complete -c zmx -n "__fish_seen_subcommand_from attach run detach kill history" -a '(zmx list --short 2>/dev/null)' -d 'Session name'
     \\
     \\complete -c zmx -n "__fish_seen_subcommand_from completions" -a 'bash zsh fish' -d 'Shell'
     \\

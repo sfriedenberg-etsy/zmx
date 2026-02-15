@@ -363,7 +363,12 @@ pub fn main() !void {
         const arg = args.next() orelse return;
         const shell = completions.Shell.fromString(arg) orelse return;
         return printCompletions(shell);
+    } else if (std.mem.eql(u8, cmd, "detach-all") or std.mem.eql(u8, cmd, "da")) {
+        return detachAllSessions(&cfg);
     } else if (std.mem.eql(u8, cmd, "detach") or std.mem.eql(u8, cmd, "d")) {
+        if (args.next()) |session_name| {
+            return detachSession(&cfg, session_name);
+        }
         return detachAll(&cfg);
     } else if (std.mem.eql(u8, cmd, "kill") or std.mem.eql(u8, cmd, "k")) {
         const session_name = args.next() orelse {
@@ -483,7 +488,8 @@ fn help() !void {
         \\Commands:
         \\  [a]ttach <name> [command...]  Attach to session, creating session if needed
         \\  [r]un <name> [command...]     Send command without attaching, creating session if needed
-        \\  [d]etach                      Detach all clients from current session (ctrl+\ for current client)
+        \\  [d]etach [<name>]              Detach all clients from current or named session
+        \\  [da] detach-all               Detach all clients from all sessions
         \\  [l]ist [--short]              List active sessions
         \\  [c]ompletions <shell>         Completion scripts for shell integration (bash, zsh, or fish)
         \\  [k]ill <name>                 Kill a session and all attached clients
@@ -619,6 +625,66 @@ fn detachAll(cfg: *Cfg) !void {
 
     const encoded_name = try encodeSessionName(alloc, session_name);
     defer alloc.free(encoded_name);
+
+    const socket_path = try getSocketPath(alloc, cfg.socket_dir, session_name);
+    defer alloc.free(socket_path);
+    const result = probeSession(alloc, socket_path) catch |err| {
+        std.log.err("session unresponsive: {s}", .{@errorName(err)});
+        cleanupStaleSocket(dir, encoded_name);
+        return;
+    };
+    defer posix.close(result.fd);
+    ipc.send(result.fd, .DetachAll, "") catch |err| switch (err) {
+        error.BrokenPipe, error.ConnectionResetByPeer => return,
+        else => return err,
+    };
+}
+
+fn detachAllSessions(cfg: *Cfg) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+
+    var dir = try std.fs.openDirAbsolute(cfg.socket_dir, .{ .iterate = true });
+    defer dir.close();
+    var iter = dir.iterate();
+
+    while (try iter.next()) |entry| {
+        const exists = sessionExists(dir, entry.name) catch continue;
+        if (!exists) continue;
+
+        const socket_path = getSocketPath(alloc, cfg.socket_dir, entry.name) catch continue;
+        defer alloc.free(socket_path);
+
+        const result = probeSession(alloc, socket_path) catch {
+            cleanupStaleSocket(dir, entry.name);
+            continue;
+        };
+        defer posix.close(result.fd);
+
+        ipc.send(result.fd, .DetachAll, "") catch |err| switch (err) {
+            error.BrokenPipe, error.ConnectionResetByPeer => continue,
+            else => return err,
+        };
+    }
+}
+
+fn detachSession(cfg: *Cfg, session_name: []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+
+    var dir = try std.fs.openDirAbsolute(cfg.socket_dir, .{});
+    defer dir.close();
+
+    const encoded_name = try encodeSessionName(alloc, session_name);
+    defer alloc.free(encoded_name);
+
+    const exists = try sessionExists(dir, encoded_name);
+    if (!exists) {
+        std.log.err("session does not exist session_name={s}", .{session_name});
+        return;
+    }
 
     const socket_path = try getSocketPath(alloc, cfg.socket_dir, session_name);
     defer alloc.free(socket_path);
