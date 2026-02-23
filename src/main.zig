@@ -363,6 +363,9 @@ pub fn main() !void {
         const arg = args.next() orelse return;
         const shell = completions.Shell.fromString(arg) orelse return;
         return printCompletions(shell);
+    } else if (std.mem.eql(u8, cmd, "fork") or std.mem.eql(u8, cmd, "f")) {
+        const target_name: ?[]const u8 = args.next();
+        return forkSession(&cfg, target_name);
     } else if (std.mem.eql(u8, cmd, "detach-all") or std.mem.eql(u8, cmd, "da")) {
         return detachAllSessions(&cfg);
     } else if (std.mem.eql(u8, cmd, "detach") or std.mem.eql(u8, cmd, "d")) {
@@ -487,6 +490,7 @@ fn help() !void {
         \\
         \\Commands:
         \\  [a]ttach <name> [command...]  Attach to session, creating session if needed
+        \\  [f]ork [<name>]               Fork current session (same cmd + cwd) into a new session
         \\  [r]un <name> [command...]     Send command without attaching, creating session if needed
         \\  [d]etach [<name>]              Detach all clients from current or named session
         \\  [da] detach-all               Detach all clients from all sessions
@@ -698,6 +702,144 @@ fn detachSession(cfg: *Cfg, session_name: []const u8) !void {
         error.BrokenPipe, error.ConnectionResetByPeer => return,
         else => return err,
     };
+}
+
+fn forkSession(cfg: *Cfg, explicit_name: ?[]const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+
+    if (explicit_name) |name| {
+        return fork(cfg, name);
+    }
+
+    // Auto-generate name from $ZMX_SESSION
+    const source_name = std.process.getEnvVarOwned(alloc, "ZMX_SESSION") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => {
+            std.log.err("ZMX_SESSION env var not found: are you inside a zmx session?", .{});
+            return;
+        },
+        else => return err,
+    };
+    defer alloc.free(source_name);
+
+    var dir = try std.fs.openDirAbsolute(cfg.socket_dir, .{});
+    defer dir.close();
+
+    const auto_name = try nextForkName(alloc, dir, source_name);
+    defer alloc.free(auto_name);
+
+    return fork(cfg, auto_name);
+}
+
+fn fork(cfg: *Cfg, target_name: []const u8) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+
+    // Must be inside a zmx session
+    const source_name = std.process.getEnvVarOwned(alloc, "ZMX_SESSION") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => {
+            std.log.err("ZMX_SESSION env var not found: are you inside a zmx session?", .{});
+            return;
+        },
+        else => return err,
+    };
+    defer alloc.free(source_name);
+
+    // Probe source session for cmd + cwd
+    const source_socket_path = try getSocketPath(alloc, cfg.socket_dir, source_name);
+    defer alloc.free(source_socket_path);
+
+    const source_encoded = try encodeSessionName(alloc, source_name);
+    defer alloc.free(source_encoded);
+
+    const result = probeSession(alloc, source_socket_path) catch |err| {
+        std.log.err("source session unresponsive: {s}", .{@errorName(err)});
+        var dir = std.fs.openDirAbsolute(cfg.socket_dir, .{}) catch return;
+        defer dir.close();
+        cleanupStaleSocket(dir, source_encoded);
+        return;
+    };
+    posix.close(result.fd);
+
+    // Check target doesn't already exist
+    var dir = try std.fs.openDirAbsolute(cfg.socket_dir, .{});
+    defer dir.close();
+
+    const target_encoded = try encodeSessionName(alloc, target_name);
+    defer alloc.free(target_encoded);
+
+    const exists = sessionExists(dir, target_encoded) catch false;
+    if (exists) {
+        std.log.err("session already exists: {s}", .{target_name});
+        return;
+    }
+
+    // Extract command args from space-joined string
+    const cmd_str = result.info.cmd[0..result.info.cmd_len];
+    var command_args: std.ArrayList([]const u8) = .empty;
+    defer command_args.deinit(alloc);
+
+    if (cmd_str.len > 0) {
+        var iter = std.mem.splitScalar(u8, cmd_str, ' ');
+        while (iter.next()) |arg| {
+            if (arg.len > 0) {
+                try command_args.append(alloc, arg);
+            }
+        }
+    }
+
+    var command: ?[][]const u8 = null;
+    if (command_args.items.len > 0) {
+        command = command_args.items;
+    }
+
+    // chdir to source cwd so new daemon inherits it
+    const source_cwd = result.info.cwd[0..result.info.cwd_len];
+    if (source_cwd.len > 0) {
+        std.posix.chdir(source_cwd) catch |err| {
+            std.log.warn("could not chdir to {s}: {s}", .{ source_cwd, @errorName(err) });
+        };
+    }
+
+    // Spawn new session without attaching
+    const c_alloc = std.heap.c_allocator;
+    const clients = try std.ArrayList(*Client).initCapacity(c_alloc, 10);
+
+    var daemon = Daemon{
+        .running = true,
+        .cfg = cfg,
+        .alloc = c_alloc,
+        .clients = clients,
+        .session_name = target_name,
+        .socket_path = undefined,
+        .pid = undefined,
+        .command = command,
+        .cwd = source_cwd,
+    };
+    daemon.socket_path = try getSocketPath(c_alloc, cfg.socket_dir, target_name);
+
+    std.log.info("forking session={s} from={s}", .{ target_name, source_name });
+    const ensure_result = try ensureSession(&daemon);
+    if (ensure_result.is_daemon) return;
+}
+
+fn nextForkName(alloc: std.mem.Allocator, dir: std.fs.Dir, base_name: []const u8) ![]const u8 {
+    var i: u32 = 1;
+    while (i < 1000) : (i += 1) {
+        const candidate = try std.fmt.allocPrint(alloc, "{s}-{d}", .{ base_name, i });
+        const encoded = encodeSessionName(alloc, candidate) catch {
+            alloc.free(candidate);
+            continue;
+        };
+        defer alloc.free(encoded);
+
+        const exists = sessionExists(dir, encoded) catch false;
+        if (!exists) return candidate;
+        alloc.free(candidate);
+    }
+    return error.TooManySessions;
 }
 
 fn kill(cfg: *Cfg, session_name: []const u8) !void {
