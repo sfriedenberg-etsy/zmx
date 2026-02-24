@@ -551,15 +551,19 @@ fn help() !void {
     const help_text =
         \\zmx - session persistence for terminal processes
         \\
-        \\Usage: zmx <command> [args]
+        \\Usage: zmx [-g <group>] <command> [args]
+        \\
+        \\Global flags:
+        \\  -g, --group <name>            Session group (default: "default", or $ZMX_GROUP)
         \\
         \\Commands:
         \\  [a]ttach <name> [command...]  Attach to session, creating session if needed
         \\  [f]ork [<name>]               Fork current session (same cmd + cwd) into a new session
         \\  [r]un <name> [command...]     Send command without attaching, creating session if needed
         \\  [d]etach [<name>]              Detach all clients from current or named session
-        \\  [da] detach-all               Detach all clients from all sessions
-        \\  [l]ist [--short]              List active sessions
+        \\  [da] detach-all               Detach all clients from all sessions in group
+        \\  [gs] groups                   List active session groups
+        \\  [l]ist [--short]              List active sessions in group
         \\  [c]ompletions <shell>         Completion scripts for shell integration (bash, zsh, or fish)
         \\  [k]ill <name>                 Kill a session and all attached clients
         \\  [hi]story <name> [--vt|--html] Output session scrollback (--vt or --html for escape sequences)

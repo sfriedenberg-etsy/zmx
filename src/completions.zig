@@ -29,14 +29,42 @@ const bash_completions =
     \\  cur="${COMP_WORDS[COMP_CWORD]}"
     \\  prev="${COMP_WORDS[COMP_CWORD-1]}"
     \\
-    \\  local commands="attach run detach detach-all fork list completions kill history version help"
+    \\  local commands="attach run detach detach-all fork groups list completions kill history version help"
     \\
-    \\  if [[ $COMP_CWORD -eq 1 ]]; then
+    \\  # Handle -g/--group flag
+    \\  if [[ "$prev" == "-g" || "$prev" == "--group" ]]; then
+    \\    local groups=$(zmx groups 2>/dev/null | tr '\n' ' ')
+    \\    COMPREPLY=($(compgen -W "$groups" -- "$cur"))
+    \\    return 0
+    \\  fi
+    \\
+    \\  if [[ "$cur" == -* ]]; then
+    \\    COMPREPLY=($(compgen -W "-g --group" -- "$cur"))
+    \\    return 0
+    \\  fi
+    \\
+    \\  # Find the subcommand (skip -g <group>)
+    \\  local subcmd=""
+    \\  local i=1
+    \\  while [[ $i -lt $COMP_CWORD ]]; do
+    \\    local word="${COMP_WORDS[$i]}"
+    \\    if [[ "$word" == "-g" || "$word" == "--group" ]]; then
+    \\      ((i+=2))
+    \\      continue
+    \\    fi
+    \\    if [[ "$word" != -* ]]; then
+    \\      subcmd="$word"
+    \\      break
+    \\    fi
+    \\    ((i++))
+    \\  done
+    \\
+    \\  if [[ -z "$subcmd" ]]; then
     \\    COMPREPLY=($(compgen -W "$commands" -- "$cur"))
     \\    return 0
     \\  fi
     \\
-    \\  case "$prev" in
+    \\  case "$subcmd" in
     \\    attach|run|detach|kill|history)
     \\      local sessions=$(zmx list --short 2>/dev/null | tr '\n' ' ')
     \\      COMPREPLY=($(compgen -W "$sessions" -- "$cur"))
@@ -61,6 +89,7 @@ const zsh_completions =
     \\  typeset -A opt_args
     \\
     \\  _arguments -C \
+    \\    '(-g --group)'{-g,--group}'[Session group]:group:_zmx_groups' \
     \\    '1: :->commands' \
     \\    '2: :->args' \
     \\    '*: :->trailing' \
@@ -73,9 +102,10 @@ const zsh_completions =
     \\        'attach:Attach to session, creating if needed'
     \\        'run:Send command without attaching'
     \\        'detach:Detach all clients from current or named session'
-    \\        'detach-all:Detach all clients from all sessions'
+    \\        'detach-all:Detach all clients from all sessions in group'
     \\        'fork:Fork current session with same command'
-    \\        'list:List active sessions'
+    \\        'groups:List active session groups'
+    \\        'list:List active sessions in group'
     \\        'completions:Shell completion scripts'
     \\        'kill:Kill a session'
     \\        'history:Output session scrollback'
@@ -103,6 +133,15 @@ const zsh_completions =
     \\  esac
     \\}
     \\
+    \\_zmx_groups() {
+    \\  local -a groups
+    \\  local output=$(zmx groups 2>/dev/null)
+    \\  if [[ -n "$output" ]]; then
+    \\    groups+=(${(f)output})
+    \\  fi
+    \\  _describe 'group' groups
+    \\}
+    \\
     \\_zmx_sessions() {
     \\  local -a sessions
     \\
@@ -120,15 +159,18 @@ const zsh_completions =
 const fish_completions =
     \\complete -c zmx -f
     \\
-    \\set -l subcommands attach run detach detach-all fork list completions kill history version help
+    \\set -l subcommands attach run detach detach-all fork groups list completions kill history version help
     \\set -l no_subcmd "not __fish_seen_subcommand_from $subcommands"
+    \\
+    \\complete -c zmx -n $no_subcmd -s g -l group -d 'Session group' -r -a '(zmx groups 2>/dev/null)'
     \\
     \\complete -c zmx -n $no_subcmd -a attach -d 'Attach to session, creating if needed'
     \\complete -c zmx -n $no_subcmd -a run -d 'Send command without attaching'
     \\complete -c zmx -n $no_subcmd -a detach -d 'Detach all clients from current or named session'
-    \\complete -c zmx -n $no_subcmd -a detach-all -d 'Detach all clients from all sessions'
+    \\complete -c zmx -n $no_subcmd -a detach-all -d 'Detach all clients from all sessions in group'
     \\complete -c zmx -n $no_subcmd -a fork -d 'Fork current session with same command'
-    \\complete -c zmx -n $no_subcmd -a list -d 'List active sessions'
+    \\complete -c zmx -n $no_subcmd -a groups -d 'List active session groups'
+    \\complete -c zmx -n $no_subcmd -a list -d 'List active sessions in group'
     \\complete -c zmx -n $no_subcmd -a completions -d 'Shell completion scripts'
     \\complete -c zmx -n $no_subcmd -a kill -d 'Kill a session'
     \\complete -c zmx -n $no_subcmd -a history -d 'Output session scrollback'
