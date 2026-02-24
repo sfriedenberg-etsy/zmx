@@ -1,3 +1,6 @@
+
+default: build test
+
 build:
   nix build .#zmx-libvterm
 
