@@ -378,7 +378,32 @@ pub fn main() !void {
     defer args.deinit();
     _ = args.skip(); // skip program name
 
-    var cfg = try Cfg.init(alloc, "default");
+    // Parse global flags before subcommand
+    var group: []const u8 = posix.getenv("ZMX_GROUP") orelse "default";
+    var cmd: ?[]const u8 = null;
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-g") or std.mem.eql(u8, arg, "--group")) {
+            group = args.next() orelse {
+                std.log.err("--group requires a value", .{});
+                return error.MissingGroupValue;
+            };
+            // Validate group name
+            if (group.len == 0) {
+                std.log.err("group name cannot be empty", .{});
+                return error.InvalidGroupName;
+            }
+            if (std.mem.indexOf(u8, group, "/") != null or std.mem.indexOf(u8, group, "..") != null) {
+                std.log.err("invalid group name: {s}", .{group});
+                return error.InvalidGroupName;
+            }
+        } else {
+            cmd = arg;
+            break;
+        }
+    }
+
+    var cfg = try Cfg.init(alloc, group);
     defer cfg.deinit(alloc);
 
     const log_path = try std.fs.path.join(alloc, &.{ cfg.log_base, "zmx.log" });
@@ -386,37 +411,37 @@ pub fn main() !void {
     try log_system.init(alloc, log_path);
     defer log_system.deinit();
 
-    const cmd = args.next() orelse {
+    const command = cmd orelse {
         return list(&cfg, false);
     };
 
-    if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "v") or std.mem.eql(u8, cmd, "-v") or std.mem.eql(u8, cmd, "--version")) {
+    if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "v") or std.mem.eql(u8, command, "-v") or std.mem.eql(u8, command, "--version")) {
         return printVersion();
-    } else if (std.mem.eql(u8, cmd, "help") or std.mem.eql(u8, cmd, "h") or std.mem.eql(u8, cmd, "-h")) {
+    } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "h") or std.mem.eql(u8, command, "-h")) {
         return help();
-    } else if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "l")) {
+    } else if (std.mem.eql(u8, command, "list") or std.mem.eql(u8, command, "l")) {
         const short = if (args.next()) |arg| std.mem.eql(u8, arg, "--short") else false;
         return list(&cfg, short);
-    } else if (std.mem.eql(u8, cmd, "completions") or std.mem.eql(u8, cmd, "c")) {
+    } else if (std.mem.eql(u8, command, "completions") or std.mem.eql(u8, command, "c")) {
         const arg = args.next() orelse return;
         const shell = completions.Shell.fromString(arg) orelse return;
         return printCompletions(shell);
-    } else if (std.mem.eql(u8, cmd, "fork") or std.mem.eql(u8, cmd, "f")) {
+    } else if (std.mem.eql(u8, command, "fork") or std.mem.eql(u8, command, "f")) {
         const target_name: ?[]const u8 = args.next();
         return forkSession(&cfg, target_name);
-    } else if (std.mem.eql(u8, cmd, "detach-all") or std.mem.eql(u8, cmd, "da")) {
+    } else if (std.mem.eql(u8, command, "detach-all") or std.mem.eql(u8, command, "da")) {
         return detachAllSessions(&cfg);
-    } else if (std.mem.eql(u8, cmd, "detach") or std.mem.eql(u8, cmd, "d")) {
+    } else if (std.mem.eql(u8, command, "detach") or std.mem.eql(u8, command, "d")) {
         if (args.next()) |session_name| {
             return detachSession(&cfg, session_name);
         }
         return detachAll(&cfg);
-    } else if (std.mem.eql(u8, cmd, "kill") or std.mem.eql(u8, cmd, "k")) {
+    } else if (std.mem.eql(u8, command, "kill") or std.mem.eql(u8, command, "k")) {
         const session_name = args.next() orelse {
             return error.SessionNameRequired;
         };
         return kill(&cfg, session_name);
-    } else if (std.mem.eql(u8, cmd, "history") or std.mem.eql(u8, cmd, "hi")) {
+    } else if (std.mem.eql(u8, command, "history") or std.mem.eql(u8, command, "hi")) {
         var session_name: ?[]const u8 = null;
         var format: terminal.Format = .plain;
         while (args.next()) |arg| {
@@ -432,7 +457,7 @@ pub fn main() !void {
             return error.SessionNameRequired;
         }
         return history(&cfg, session_name.?, format);
-    } else if (std.mem.eql(u8, cmd, "attach") or std.mem.eql(u8, cmd, "a")) {
+    } else if (std.mem.eql(u8, command, "attach") or std.mem.eql(u8, command, "a")) {
         const session_name = args.next() orelse {
             return error.SessionNameRequired;
         };
@@ -444,9 +469,9 @@ pub fn main() !void {
         }
 
         const clients = try std.ArrayList(*Client).initCapacity(alloc, 10);
-        var command: ?[][]const u8 = null;
+        var spawn_command: ?[][]const u8 = null;
         if (command_args.items.len > 0) {
-            command = command_args.items;
+            spawn_command = command_args.items;
         }
 
         var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -460,13 +485,13 @@ pub fn main() !void {
             .session_name = session_name,
             .socket_path = undefined,
             .pid = undefined,
-            .command = command,
+            .command = spawn_command,
             .cwd = cwd,
         };
         daemon.socket_path = try getSocketPath(alloc, cfg.socket_dir, session_name);
         std.log.info("socket path={s}", .{daemon.socket_path});
         return attach(&daemon);
-    } else if (std.mem.eql(u8, cmd, "run") or std.mem.eql(u8, cmd, "r")) {
+    } else if (std.mem.eql(u8, command, "run") or std.mem.eql(u8, command, "r")) {
         const session_name = args.next() orelse {
             return error.SessionNameRequired;
         };
