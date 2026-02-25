@@ -1493,6 +1493,7 @@ fn daemonLoop(daemon: *Daemon, server_sock_fd: i32, pty_fd: i32) !void {
         }
 
         _ = posix.poll(poll_fds.items, -1) catch |err| {
+            if (err == error.Interrupted) continue; // EINTR from signal, loop again
             return err;
         };
 
@@ -1517,7 +1518,7 @@ fn daemonLoop(daemon: *Daemon, server_sock_fd: i32, pty_fd: i32) !void {
             // Read from PTY
             var buf: [4096]u8 = undefined;
             const n_opt: ?usize = posix.read(pty_fd, &buf) catch |err| blk: {
-                if (err == error.WouldBlock) break :blk null;
+                if (err == error.WouldBlock or err == error.Interrupted) break :blk null;
                 break :blk 0;
             };
 
