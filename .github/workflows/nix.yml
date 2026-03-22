@@ -49,4 +49,4 @@ jobs:
           name: "sfriedenberg-etsy/zmx"
           rolling: true
           visibility: "public"
-          include-output-paths: true
+          include-output-paths: false
