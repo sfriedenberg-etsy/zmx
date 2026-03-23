@@ -27,16 +27,9 @@
         };
         pkgs = env.pkgs;
       in
-      with builtins;
-      with pkgs.lib;
       let
-        isDarwin = pkgs.stdenv.isDarwin;
-        zmx-package = env.package {
-          src = cleanSource ./.;
-          zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
-        };
         zmx-libvterm = env.package {
-          src = cleanSource ./.;
+          src = pkgs.lib.cleanSource ./.;
           zigBuildFlags = [
             "-Doptimize=ReleaseSafe"
             "-Dbackend=libvterm"
@@ -53,36 +46,24 @@
               --prefix DYLD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libvterm-neovim ]}
           '';
         };
-        defaultPackage = if isDarwin then zmx-libvterm else zmx-package;
       in
       {
         packages = {
           zmx-libvterm = zmx-libvterm;
-          default = defaultPackage;
-        }
-        // optionalAttrs (!isDarwin) {
-          zmx = zmx-package;
+          # ghostty backend requires network access for git dependency,
+          # which is unavailable in the Nix sandbox
+          default = zmx-libvterm;
         };
 
         apps = {
           default = {
             type = "app";
-            program = "${defaultPackage}/bin/zmx";
+            program = "${zmx-libvterm}/bin/zmx";
           };
 
-          build = env.app [ ] (
-            if isDarwin then "zig build -Dbackend=libvterm \"$@\"" else "zig build \"$@\""
-          );
+          build = env.app [ ] "zig build -Dbackend=libvterm \"$@\"";
 
-          test = env.app [ ] (
-            if isDarwin then "zig build -Dbackend=libvterm test -- \"$@\"" else "zig build test -- \"$@\""
-          );
-        }
-        // optionalAttrs (!isDarwin) {
-          zmx = {
-            type = "app";
-            program = "${zmx-package}/bin/zmx";
-          };
+          test = env.app [ ] "zig build -Dbackend=libvterm test -- \"$@\"";
         };
 
         devShells.default = env.mkShell {
