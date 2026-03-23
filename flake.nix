@@ -28,10 +28,6 @@
         pkgs = env.pkgs;
       in
       let
-        zmx = env.package {
-          src = pkgs.lib.cleanSource ./.;
-          zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
-        };
         zmx-libvterm = env.package {
           src = pkgs.lib.cleanSource ./.;
           zigBuildFlags = [
@@ -49,16 +45,19 @@
       in
       {
         packages = {
-          inherit zmx zmx-libvterm;
-          default = zmx;
+          inherit zmx-libvterm;
+          # Nix builds use libvterm: ghostty's transitive URL deps
+          # can't be fetched in the sandbox
+          default = zmx-libvterm;
         };
 
         apps = {
           default = {
             type = "app";
-            program = "${zmx}/bin/zmx";
+            program = "${zmx-libvterm}/bin/zmx";
           };
 
+          # Dev apps default to ghostty backend (vendored in deps/)
           build = env.app [ ] "zig build \"$@\"";
 
           test = env.app [ ] "zig build test -- \"$@\"";
