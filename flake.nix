@@ -28,6 +28,10 @@
         pkgs = env.pkgs;
       in
       let
+        zmx = env.package {
+          src = pkgs.lib.cleanSource ./.;
+          zigBuildFlags = [ "-Doptimize=ReleaseSafe" ];
+        };
         zmx-libvterm = env.package {
           src = pkgs.lib.cleanSource ./.;
           zigBuildFlags = [
@@ -36,10 +40,6 @@
           ];
           buildInputs = [ pkgs.libvterm-neovim ];
           nativeBuildInputs = [ pkgs.makeWrapper ];
-          # Remove ghostty dependency from zon file - not needed for libvterm backend
-          postPatch = ''
-            sed -i '/\.dependencies = \.{/,/},/{/\.ghostty/,/},/d;}' build.zig.zon
-          '';
           postInstall = ''
             wrapProgram $out/bin/zmx \
               --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libvterm-neovim ]} \
@@ -49,21 +49,19 @@
       in
       {
         packages = {
-          zmx-libvterm = zmx-libvterm;
-          # ghostty backend requires network access for git dependency,
-          # which is unavailable in the Nix sandbox
-          default = zmx-libvterm;
+          inherit zmx zmx-libvterm;
+          default = zmx;
         };
 
         apps = {
           default = {
             type = "app";
-            program = "${zmx-libvterm}/bin/zmx";
+            program = "${zmx}/bin/zmx";
           };
 
-          build = env.app [ ] "zig build -Dbackend=libvterm \"$@\"";
+          build = env.app [ ] "zig build \"$@\"";
 
-          test = env.app [ ] "zig build -Dbackend=libvterm test -- \"$@\"";
+          test = env.app [ ] "zig build test -- \"$@\"";
         };
 
         devShells.default = env.mkShell {
