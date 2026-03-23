@@ -70,9 +70,13 @@
             program = "${defaultPackage}/bin/zmx";
           };
 
-          build = env.app [ ] "zig build \"$@\"";
+          build = env.app [ ] (
+            if isDarwin then "zig build -Dbackend=libvterm \"$@\"" else "zig build \"$@\""
+          );
 
-          test = env.app [ ] "zig build test -- \"$@\"";
+          test = env.app [ ] (
+            if isDarwin then "zig build -Dbackend=libvterm test -- \"$@\"" else "zig build test -- \"$@\""
+          );
         }
         // optionalAttrs (!isDarwin) {
           zmx = {

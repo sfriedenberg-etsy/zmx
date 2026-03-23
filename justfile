@@ -2,7 +2,7 @@
 default: build test
 
 build:
-  nix build .#zmx-libvterm
+  nix build .#default
 
 check:
   nix run .#build -- check
