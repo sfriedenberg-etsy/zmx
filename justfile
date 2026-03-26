@@ -5,10 +5,10 @@ build:
   nix build .#default
 
 check:
-  nix develop -c zig build check
+  nix develop -c zig build check -Dbackend=libvterm
 
 test:
-  nix develop -c zig build test
+  nix develop -c zig build test -Dbackend=libvterm
 
 ghostty_commit := "a692cb9e5fabfd337827cc99cd62e3ea90ab9c92"
 

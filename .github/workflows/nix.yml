@@ -49,5 +49,3 @@ jobs:
           name: "amarbel-llc/zmx"
           rolling: true
           visibility: "public"
-          # zig2nix FODs fail in sandboxed eval; see https://github.com/DeterminateSystems/flakehub-push/issues/296
-          include-output-paths: false
