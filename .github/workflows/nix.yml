@@ -46,7 +46,7 @@ jobs:
           determinate: true
       - uses: DeterminateSystems/flakehub-push@main
         with:
-          name: "sfriedenberg-etsy/zmx"
+          name: "amarbel-llc/zmx"
           rolling: true
           visibility: "public"
           # zig2nix FODs fail in sandboxed eval; see https://github.com/DeterminateSystems/flakehub-push/issues/296
