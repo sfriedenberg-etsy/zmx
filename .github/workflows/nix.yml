@@ -30,8 +30,6 @@ jobs:
         with:
           determinate: true
       - uses: DeterminateSystems/flakehub-cache-action@main
-        with:
-          include-output-paths: true
       - run: nix develop -c just
 
   flakehub-publish:
