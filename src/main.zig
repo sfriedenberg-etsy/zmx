@@ -8,7 +8,7 @@ const log = @import("log.zig");
 const completions = @import("completions.zig");
 
 pub const version = build_options.version;
-pub const git_sha = build_options.git_sha;
+pub const commit = build_options.commit;
 pub const ghostty_version = build_options.ghostty_version;
 
 var log_system = log.LogSystem{};
@@ -536,13 +536,15 @@ pub fn main() !void {
 }
 
 fn printVersion() !void {
-    var buf: [256]u8 = undefined;
+    var buf: [512]u8 = undefined;
     var w = std.fs.File.stdout().writer(&buf);
-    var ver = version;
-    if (builtin.mode == .Debug) {
-        ver = git_sha;
+
+    try w.interface.print("{s:<20} {s:<12} {s}\n", .{ "COMPONENT", "VERSION", "REV" });
+    try w.interface.print("{s:<20} {s:<12} {s}\n", .{ "zmx", version, commit });
+    switch (build_options.backend) {
+        .ghostty => try w.interface.print("{s:<20} {s:<12} {s}\n", .{ "ghostty-vt", "", ghostty_version }),
+        .libvterm => try w.interface.print("{s:<20} {s:<12} {s}\n", .{ "libvterm", "(system)", "" }),
     }
-    try w.interface.print("zmx {s}\nghostty-vt {s}\n", .{ ver, ghostty_version });
     try w.interface.flush();
 }
 

@@ -31,10 +31,13 @@ pub fn build(b: *std.Build) void {
         &code,
         .Inherit,
     ) catch "unknown", "\n");
+    // -Dcommit wins over the captured git_sha so Nix builds (which run in
+    // a sandboxed source with no .git) get a real commit, not "unknown".
+    const commit = b.option([]const u8, "commit", "Commit identifier for release") orelse git_sha;
 
     const options = b.addOptions();
     options.addOption([]const u8, "version", version);
-    options.addOption([]const u8, "git_sha", git_sha);
+    options.addOption([]const u8, "commit", commit);
     const ghostty_dep = @import("build.zig.zon").dependencies;
     const ghostty_version: []const u8 = if (!@hasField(@TypeOf(ghostty_dep), "ghostty"))
         "(libvterm backend)"

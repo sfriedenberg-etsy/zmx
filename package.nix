@@ -6,11 +6,15 @@
   makeWrapper,
   libvterm-neovim,
   useLibvterm ? false,
+  # Defaulted so that non-flake consumers (e.g. direct `nix-build` against
+  # this file) still work; flake.nix overrides both for release builds.
+  version ? "dev",
+  commit ? "unknown",
 }:
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "zmx${lib.optionalString useLibvterm "-libvterm"}";
-  version = "0.4.1";
+  inherit version;
 
   src = lib.cleanSource ./.;
 
@@ -37,6 +41,8 @@ stdenv.mkDerivation (finalAttrs: {
   zigBuildFlags = [
     "--system"
     "${finalAttrs.deps}"
+    "-Dversion=${version}"
+    "-Dcommit=${commit}"
   ]
   ++ lib.optionals useLibvterm [ "-Dbackend=libvterm" ];
 
