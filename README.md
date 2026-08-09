@@ -36,12 +36,12 @@ brew install zmx
 
 ### src
 
-- Requires zig `v0.15`
+- Requires a Rust toolchain (stable)
 - Clone the repo
 - Run build cmd
 
 ```bash
-zig build -Doptimize=ReleaseSafe --prefix ~/.local
+cargo install --path . --root ~/.local
 # be sure to add ~/.local/bin to your PATH
 ```
 
@@ -268,24 +268,26 @@ We are evaluating what should be configurable and what should not. Every configu
 - The `daemon` and client processes communicate via a unix socket
 - Both `daemon` and `client` loops leverage `poll()`
 - Each session creates its own unix socket file
-- We restore terminal state and output using `libghostty-vt`
+- We restore terminal state and output using a built-in terminal emulator (`zmx-vt`)
 
-### libghostty-vt
+### zmx-vt
 
-We use `libghostty-vt` to restore the previous state of the terminal when a client re-attaches to a session.
+`zmx` ships its own small terminal emulator (a pure-Rust VT state machine, see
+`src/vt/`) to restore the previous state of the terminal when a client
+re-attaches to a session.
 
 How it works:
 
 - user creates session `zmx attach term`
 - user interacts with terminal stdin
 - stdin gets sent to pty via daemon
-- daemon sends pty output to client *and* `ghostty-vt`
-- `ghostty-vt` holds terminal state and scrollback
+- daemon sends pty output to client *and* the built-in emulator
+- the emulator holds terminal state and scrollback
 - user disconnects
 - user re-attaches to session
-- `ghostty-vt` sends terminal snapshot to client stdout
+- the emulator sends a terminal snapshot to client stdout
 
-In this way, `ghostty-vt` doesn't sit in the middle of an active terminal session, it simply receives all the same data the client receives so it can re-hydrate clients that connect to the session. This enables users to pick up where they left off as if they didn't disconnect from the terminal session at all. It also has the added benefit of being very fast, the only thing sitting in-between you and your PTY is a unix socket.
+In this way, the emulator doesn't sit in the middle of an active terminal session, it simply receives all the same data the client receives so it can re-hydrate clients that connect to the session. This enables users to pick up where they left off as if they didn't disconnect from the terminal session at all. It also has the added benefit of being very fast, the only thing sitting in-between you and your PTY is a unix socket.
 
 ## prior art
 

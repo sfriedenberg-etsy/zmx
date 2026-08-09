@@ -5,13 +5,6 @@
     utils.url = "https://flakehub.com/f/numtide/flake-utils/0.1.102";
     nixpkgs-master.url = "github:NixOS/nixpkgs/567a49d1913ce81ac6e9582e3553dd90a955875f";
     nixpkgs.url = "github:NixOS/nixpkgs/3e20095fe3c6cbb1ddcef89b26969a69a1570776";
-    # Dedicated, never-followed nixpkgs for the Zig toolchain. Pinning zig
-    # here (rather than taking it from the main `nixpkgs` input) means a
-    # downstream consumer that does `inputs.zmx.inputs.nixpkgs.follows`
-    # (e.g. amarbel-llc/eng) cannot shift the compiler and invalidate
-    # package.nix's fetchDeps depsHash. Keep this rev in lockstep with the
-    # rev the committed depsHash was computed against.
-    nixpkgs-zig.url = "github:NixOS/nixpkgs/3e20095fe3c6cbb1ddcef89b26969a69a1570776";
     # amarbel-llc/bats exposes `batsLane` (lifted from the
     # amarbel-llc/nixpkgs overlay) so consumers don't need to pull
     # the fork's nixpkgs just for the lane builder. We follow our
@@ -24,14 +17,14 @@
       self,
       nixpkgs,
       nixpkgs-master,
-      nixpkgs-zig,
       bats,
       utils,
       ...
     }:
     let
-      # Burnt into the binary via -Dversion / -Dcommit. Single source of
-      # truth for the release version; bump this line and tag.
+      # Burnt into the binary via ZMX_VERSION / ZMX_COMMIT (see build.rs).
+      # Single source of truth for the release version; bump this line
+      # (and Cargo.toml, via `just bump-version`) and tag.
       zmxVersion = "0.16.2";
       # shortRev for clean builds, dirty-prefixed dirtyShortRev for dirty
       # working trees so devshell builds don't masquerade as clean
@@ -57,26 +50,16 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          # Zig comes from the pinned nixpkgs-zig so the package build's
-          # depsHash stays valid even when a consumer follows our nixpkgs.
-          pkgsZig = import nixpkgs-zig { inherit system; };
-          callZmx =
-            args:
-            pkgs.callPackage ./package.nix (
-              {
-                version = zmxVersion;
-                commit = zmxCommit;
-                zig_0_15 = pkgsZig.zig_0_15;
-              }
-              // args
-            );
-          zmx-libvterm = callZmx { useLibvterm = true; };
+          zmx = pkgs.callPackage ./package.nix {
+            version = zmxVersion;
+            commit = zmxCommit;
+          };
 
           batsLib = import ./bats.nix {
             inherit pkgs;
             batsLane = bats.lib.${system}.batsLane;
             bats-libs = bats.packages.${system}.bats-libs;
-            zmxBin = zmx-libvterm;
+            zmxBin = zmx;
             batsSrc = pkgs.lib.cleanSourceWith {
               src = ./zz-tests_bats;
               filter =
@@ -90,8 +73,8 @@
         in
         {
           packages = batsLib.batsLaneOutputs // {
-            inherit zmx-libvterm;
-            default = zmx-libvterm;
+            inherit zmx;
+            default = zmx;
           };
 
           checks = {
@@ -101,8 +84,10 @@
           devShells.default = pkgs.mkShell {
             buildInputs = [
               pkgs.just
-              pkgs.zig_0_15
-              pkgs.libvterm-neovim
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.rustfmt
+              pkgs.clippy
             ];
           };
         }

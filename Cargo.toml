@@ -1,0 +1,18 @@
+[package]
+name = "zmx"
+version = "0.16.2"
+edition = "2021"
+description = "Session persistence for terminal processes"
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
+unicode-width = "0.2"
+
+[profile.release]
+lto = true
+strip = true
+
+[[bin]]
+name = "zmx"
+path = "src/main.rs"

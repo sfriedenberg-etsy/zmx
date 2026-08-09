@@ -33,9 +33,8 @@ run_zmx() {
 #
 # A zmx client is just a socket connection that speaks the binary protocol, so
 # tests can drive "fake" clients with socat (no PTY allocation). The wire format
-# is an 8-byte Header { tag:u8, len:u32 } followed by `len` payload bytes. The
-# header is 8 (not 5) bytes because its u40 backing integer makes @sizeOf round
-# up to 8, leaving 3 trailing pad bytes.
+# is an 8-byte Header { tag:u8, len:u32 LE, 3 pad bytes } followed by `len`
+# payload bytes (see src/ipc.rs).
 
 # Render a u16 as two little-endian \xNN printf escapes.
 zmx_le16() { printf '\\x%02x\\x%02x' "$(( $1 & 255 ))" "$(( ($1 >> 8) & 255 ))"; }

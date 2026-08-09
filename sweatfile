@@ -5,7 +5,7 @@
 
 [hooks]
 # `just` runs the default recipe (justfile:2 — `default: build test`):
-# nix build (.#default) + zig unit tests + bats integration suite. That
+# nix build (.#default) + rust unit tests + bats integration suite. That
 # is the CI-equivalent target for this repo, so it doubles as the
 # pre-merge gate.
 #

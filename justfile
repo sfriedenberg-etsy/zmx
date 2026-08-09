@@ -6,13 +6,14 @@ build: build-nix
 build-nix:
   nix build .#default
 
-validate-zig:
-  nix develop -c zig build check -Dbackend=libvterm
+# Rust compilation check (for IDE integration / quick validation).
+validate:
+  cargo check
 
-test: test-zig test-bats
+test: test-rust test-bats
 
-test-zig:
-  nix develop -c zig build test -Dbackend=libvterm
+test-rust:
+  cargo test
 
 test-bats:
   nix build .#bats-default --no-link --print-build-logs
@@ -27,15 +28,6 @@ test-bats-local *targets="*.bats":
   ZMX_BIN=$(realpath ./result/bin/zmx) \
     BATS_TEST_TIMEOUT=10 \
     bats --jobs $(nproc) zz-tests_bats/{{targets}}
-
-ghostty_commit := "a692cb9e5fabfd337827cc99cd62e3ea90ab9c92"
-
-# Vendor ghostty dependency into deps/ghostty
-vendor:
-  rm -rf deps/ghostty
-  git clone --no-checkout https://github.com/ghostty-org/ghostty.git deps/ghostty
-  cd deps/ghostty && git checkout {{ghostty_commit}}
-  rm -rf deps/ghostty/.git
 
 # Tag a release. The "v" prefix is added for you, so pass the semver
 # without it. Usage: just tag 0.4.2 "feat: detach-all wiring"
@@ -55,10 +47,11 @@ tag version message:
   echo "Pushed $tag"
   git tag -v "$tag"
 
-# Sed-rewrite zmxVersion in flake.nix to the given semver. The version
-# string is burnt into the binary at build time via -Dversion (see
-# build.zig and src/main.zig printVersion), so flake.nix is the single
-# source of truth. No-op if already at the target version.
+# Sed-rewrite zmxVersion in flake.nix (and the Cargo package version) to the
+# given semver. The version string is burnt into the binary at build time via
+# ZMX_VERSION (see build.rs and src/main.rs print_version), so flake.nix is
+# the source of truth for release builds and Cargo.toml the fallback for
+# plain cargo builds. No-op if already at the target version.
 # Usage: just bump-version 0.4.2
 [group("maint")]
 bump-version new_version:
@@ -70,6 +63,8 @@ bump-version new_version:
     exit 0
   fi
   sed -i.bak 's/zmxVersion = "'"$current"'"/zmxVersion = "{{new_version}}"/' flake.nix && rm flake.nix.bak
+  sed -i.bak '0,/^version = "/s/^version = ".*"/version = "{{new_version}}"/' Cargo.toml && rm Cargo.toml.bak
+  cargo update -p zmx --offline 2>/dev/null || cargo check -q >/dev/null 2>&1 || true
   echo "bumped zmxVersion: $current → {{new_version}}"
 
 # Cut a release: must be run on master. Bumps zmxVersion in flake.nix,
@@ -102,10 +97,10 @@ release version:
     msg="$header"
   fi
   just bump-version "{{version}}"
-  if ! git diff --quiet flake.nix; then
-    git add flake.nix
+  if ! git diff --quiet flake.nix Cargo.toml Cargo.lock; then
+    git add flake.nix Cargo.toml Cargo.lock
     git commit -m "chore: release v{{version}}"
     git push origin master
-    echo "pushed flake.nix bump to master"
+    echo "pushed version bump to master"
   fi
   just tag "{{version}}" "$msg"

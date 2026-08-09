@@ -5,41 +5,34 @@ code in this repository.
 
 ## Overview
 
-zmx is a terminal session persistence tool (alternative to tmux) written in Zig.
-It allows attaching and detaching from terminal sessions without killing
+zmx is a terminal session persistence tool (alternative to tmux) written in
+Rust. It allows attaching and detaching from terminal sessions without killing
 underlying processes, delegating window management to the OS window manager.
-Uses a daemon-per-session architecture with Unix socket IPC.
+Uses a daemon-per-session architecture with Unix socket IPC. Terminal state
+tracking is handled by a built-in VT emulator (`src/vt/`) with no external
+terminal-emulation dependencies.
 
 ## Build & Test Commands
 
 ``` sh
-just                # build + test (zig + bats), the CI-equivalent target
+just                # build + test (rust + bats), the CI-equivalent target
 just build          # aggregate: build-nix
-just test           # aggregate: test-zig test-bats
-just test-zig       # Zig unit tests via Nix
+just test           # aggregate: test-rust test-bats
+just test-rust      # Rust unit tests via cargo
 just test-bats      # bats integration suite in the nix sandbox
-just validate-zig   # Zig compilation check (for IDE integration)
+just validate       # cargo check (for IDE integration)
 ```
 
-Direct zig commands (via nix devshell):
+Direct cargo commands:
 
 ``` sh
-nix develop -c zig build check                    # Compilation check
-nix develop -c zig build test                      # Run tests
-nix develop -c zig build test -Dtest-filter=<name> # Run specific test
-zig fmt .                                          # Format code
+cargo build                  # Debug build
+cargo build --release        # Release build
+cargo test                   # Run unit tests
+cargo test <name>            # Run a specific test
+cargo fmt                    # Format code
+cargo clippy                 # Lints
 ```
-
-Two build variants: - `zmx-libvterm`: libvterm-neovim backend, wrapped with
-library paths. This is the Nix `.#default` package — it is what `just build`
-installs and what the bats suite, `just test-zig`, and `just validate-zig`
-exercise. - `zmx`: ghostty-vt backend.
-
-Note on "default": the Nix `.#default` package is `zmx-libvterm`, but
-`build.zig`'s `-Dbackend` flag defaults to `ghostty`. So a bare
-`nix develop -c zig build` in the devshell compiles the ghostty backend, while
-every `just` recipe explicitly targets libvterm. The shipped/tested binary is
-libvterm.
 
 ## Architecture
 
@@ -47,55 +40,52 @@ libvterm.
 
 Each session runs a dedicated daemon process that manages a PTY and connected
 clients. Communication uses a custom binary protocol over Unix sockets
-(`src/ipc.zig`). Message types: Input, Output, Resize, Detach, DetachAll, Kill,
-Info, Init, History, Run, Ack.
+(`src/ipc.rs`): an 8-byte header { tag: u8, len: u32 LE, 3 pad bytes } plus
+payload. Message types: Input, Output, Resize, Detach, DetachAll, Kill, Info,
+Init, History, Run, Ack. The bats suite hand-encodes this framing — do not
+change the wire format without updating `zz-tests_bats/common.bash`.
 
-### Backend System
+### Built-in Terminal Emulator
 
-Compile-time polymorphic terminal backends via `src/terminal.zig`: - **ghostty**
-(`src/backends/ghostty.zig`): the `-Dbackend` compile default. Full feature set
-including HTML serialization, palette management, keyboard state restoration. -
-**libvterm** (`src/backends/libvterm.zig`): C FFI to libvterm-neovim. Plain text
-and VT format only. This is the backend shipped by the Nix `.#default` package
-and exercised by the bats suite and `just test-zig`.
+`src/vt/` is a from-scratch VT emulator that replaced the previous
+ghostty-vt/libvterm backends:
 
-Selected at build time with `-Dbackend=ghostty|libvterm` (flag default
-`ghostty`); the Nix packages pin the backend per variant (`.#default` =
-`zmx-libvterm`).
+- `src/vt/parser.rs`: vt500-style byte state machine (Ground/Escape/CSI/OSC/
+  string states) with inline UTF-8 decoding.
+- `src/vt/mod.rs`: terminal model — grid, scrollback (cell-count budget),
+  alt screen, scroll regions, tab stops, SGR pen, modes (DECAWM, DECTCEM,
+  bracketed paste, mouse, app cursor keys, ...).
+- `src/vt/serialize.rs`: plain/VT/HTML serialization plus full state
+  restoration (`serialize_state`) used to rehydrate re-attaching clients.
+
+The emulator is record-only: query sequences that would need a response
+written back to the application (DSR, DA, ...) are ignored, because zmx
+passes PTY bytes straight through and the real terminal answers them.
 
 ### Key Source Files
 
-- `src/main.zig`: Entry point, CLI parsing, daemon/client event loops, PTY
-  management (\~2000 lines)
-- `src/terminal.zig`: Generic `Terminal(Impl)` and `VtStream(Impl)` interfaces
-- `src/ipc.zig`: Binary message protocol (5-byte header + payload)
-- `src/log.zig`: File-based logging with 5MB rotation
-- `src/completions.zig`: Embedded shell completion scripts (bash/zsh/fish)
+- `src/main.rs`: Entry point, CLI parsing, dispatch
+- `src/daemon.rs`: Daemon event loop, client bookkeeping, min-size PTY policy
+- `src/client.rs`: Attach client loop (raw mode, detach key, IO relay)
+- `src/ipc.rs`: Binary message protocol (8-byte header + payload)
+- `src/pty.rs`: forkpty, winsize, raw-mode guard, poll helpers
+- `src/session.rs`: Socket create/connect/probe/cleanup
+- `src/title.rs`: OSC 0/2 window-title tracker (replayed on re-attach)
+- `src/logger.rs`: File-based logging with 5MB rotation
+- `src/completions.rs`: Embedded shell completion scripts (bash/zsh/fish)
 
 ### Session Organization
 
 Sessions are organized into groups (`-g`/`--group` flag, `ZMX_GROUP` env var).
 Socket paths use URL percent-encoding for session names. Socket directory
-resolution: `ZMX_DIR` \> `XDG_RUNTIME_DIR/zmx` \> `TMPDIR/zmx-{uid}` \>
-`/tmp/zmx-{uid}`.
+resolution: `ZMX_DIR` \> `XDG_STATE_HOME/zmx` \> `~/.local/state/zmx`, with a
+per-group subdirectory.
 
 ### PTY Management
 
-Platform-specific: `forkpty()` on macOS/FreeBSD, `openpty()` on Linux. Uses
-`poll()` for non-blocking multiplexed I/O between PTY and clients. Uses
-`std.heap.c_allocator` (not DebugAllocator) for fork compatibility.
-
-## Finding APIs
-
-Use `zigdoc` to look up library APIs before grepping:
-
-``` sh
-zigdoc ghostty-vt
-zigdoc std.ArrayList
-```
-
-Source inspection directories: `zig_std_src/` (stdlib), `ghostty_src/`
-(ghostty-vt).
+`forkpty()` for spawning the session process; `poll()` for non-blocking
+multiplexed I/O between the PTY and clients. The daemon sizes the PTY to the
+elementwise minimum across all attached clients (tmux `window-size smallest`).
 
 ## Issue Tracking
 
@@ -104,5 +94,7 @@ Uses bd (beads) for issue tracking. Run `bd quickstart` to learn usage.
 ## Nix Flake
 
 Follows the stable-first nixpkgs convention: `nixpkgs` (stable) and
-`nixpkgs-master` (unstable). Uses nixpkgs `zig_0_15.hook` and
-`zig_0_15.fetchDeps` for Zig build integration. Build logic is in `package.nix`.
+`nixpkgs-master` (unstable). Uses `rustPlatform.buildRustPackage` with
+`cargoLock.lockFile`, so `Cargo.lock` must stay committed. Build logic is in
+`package.nix`; the version is injected via `ZMX_VERSION`/`ZMX_COMMIT`
+(see `build.rs`).

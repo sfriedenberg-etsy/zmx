@@ -26,8 +26,8 @@ setup() {
   assert_line --partial "zmx"
 }
 
-@test "version reports libvterm backend" {
+@test "version reports the built-in vt backend" {
   run_zmx version
   assert_success
-  assert_line --partial "libvterm"
+  assert_line --partial "zmx-vt"
 }
